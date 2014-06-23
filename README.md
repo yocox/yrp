@@ -6,11 +6,13 @@ This project is inspired by [yard](https://code.google.com/p/yardparser/).
 
 先來 parse 一個 integer, integer 的 regex 是 `\d+`，用 yrp 來寫是
 
-    struct integer :
-        yrp::plus<
-            yrp::digit_char
-        >
-    {};
+```c++
+struct integer :
+    yrp::plus<
+        yrp::digit_char
+    >
+{};
+```
 
 `plus` 跟 `digit_char` 都是 yrp 事先已經定義好的 parsing rule，
 `plus` 就是 regex 的 `+`，可以用來 match 一個到無限多個被 `<...>` 框住的 parsing rule，
@@ -20,28 +22,32 @@ This project is inspired by [yard](https://code.google.com/p/yardparser/).
 
 再來 parse 一個 floating number, float number 的 regex 是 `\d*.\d+`，用 yrp 來寫是
 
-    struct digit :
-        yrp::seq<
-            yrp::star<yrp::digit_char>,
-            yrp::char_<L'.'>,
-            yrp::plus<yrp::digit_char>
-        >
-    {};
+```c++
+struct digit :
+    yrp::seq<
+        yrp::star<yrp::digit_char>,
+        yrp::char_<L'.'>,
+        yrp::plus<yrp::digit_char>
+    >
+{};
+```
 
 ## 開始 parse
 
-    int main() {
-        // 宣告準備要被 parse 的字串
-        std::wstring i = L"123";
-        std::wstring f = L"3.14159";
+```c++
+int main() {
+    // 宣告準備要被 parse 的字串
+    std::wstring i = L"123";
+    std::wstring f = L"3.14159";
 
-        // 宣告 parser
-        yrp::parser<std::wstring::const_iterator> p(i.begin(), i.end());
+    // 宣告 parser
+    yrp::parser<std::wstring::const_iterator> p(i.begin(), i.end());
 
-        // 進行 parse
-        bool result = p.parse<integer>();
-        std::cout << result << std::endl; // 印出 true
-    }
+    // 進行 parse
+    bool result = p.parse<integer>();
+    std::cout << result << std::endl; // 印出 true
+}
+```
 
 不過這個簡單的 parser 沒有支援任何 semantic action。semantic action 後面會教，但很爛。
 
@@ -110,42 +116,48 @@ parsing rule 的方法，一種比較簡單，也是開發 parser 的的時候�
 
 比方假如你需要「被一對括弧框起來」的 parsing rule `parenthesis` 可以寫成
 
-    template <typename Rule>
-    struct parenthesised :
-        seq<
-            char_<L'('>,
-            Rule,
-            char_<L')'>
-        >
-    {};
+```c++
+template <typename Rule>
+struct parenthesised :
+    seq<
+        char_<L'('>,
+        Rule,
+        char_<L')'>
+    >
+{};
+```
 
 注意到上面這個 parsing rule 是個 template，所以他可以被泛化使用，很方便，當你設計自己的 parsing rule 的時候，也請盡量考慮設計成 template，增加可複用性。
 
 或是你想要 parse 一個十六進位的數字 `0[xX][0-9a-fA-F]+`
 
-    struct hex_number :
-        yrp::seq<
-            yrp::char_<L'0'>,
-            yrp::char_<L'x', L'X'>,
-            yrp::star<yrp::hex_char>
-        >
-    {};
+```c++
+struct hex_number :
+    yrp::seq<
+        yrp::char_<L'0'>,
+        yrp::char_<L'x', L'X'>,
+        yrp::star<yrp::hex_char>
+    >
+{};
+```
 
 如果寫的原始一點，那就是
 
-    struct hex_number :
-        yrp::seq<
-            yrp::char_<L'0'>,
-            yrp::char_<L'x', L'X'>,
-            yrp::star<
-                yrp::or<
-                    ypr::digit_char,
-                    ypr::range_char<L'a', L'f'>,
-                    ypr::range_char<L'A', L'F'>
-                >
+```c++
+struct hex_number :
+    yrp::seq<
+        yrp::char_<L'0'>,
+        yrp::char_<L'x', L'X'>,
+        yrp::star<
+            yrp::or<
+                ypr::digit_char,
+                ypr::range_char<L'a', L'f'>,
+                ypr::range_char<L'A', L'F'>
             >
         >
-    {};
+    >
+{};
+```
 
 ### 打造自己特殊需求的 parsing rule
 
@@ -153,45 +165,51 @@ parsing rule 的方法，一種比較簡單，也是開發 parser 的的時候�
 這個時候你就要自己手動 code parsing rule，聽起來很難，但實際上非常簡單，
 讓我們看一下 `yrp` 內建的 `star`：
 
-    template <typename Rule>
-    struct star {
-        template <typename Parser>
-        static bool match(Parser& p) {
-            while(Rule::template match(p));
-            return true;
-        }
-    };
+```c++
+template <typename Rule>
+struct star {
+    template <typename Parser>
+    static bool match(Parser& p) {
+        while(Rule::template match(p));
+        return true;
+    }
+};
+```
 
 再來看一下簡化版的 `seq`（實際上是 variadic template recursive 在做）：
 
-    template <typename Rule0, typename Rule1, ...>
-    struct seq {
-        template <typename Parser>
-        static bool match(Parser& p) {
-            typename Parser::iterator orig_pos = p.pos(); // 記住 iterator 本來的位置！
-            if(!Rule0::template match(p)) {
-                p.pos(orig_pos);    // 看這個！如果失敗了，就回到本來的的位置！
-                return false;
-            }
-            if(!Rule1::template match(p)) {
-                p.pos(orig_pos);    // 看這個！如果失敗了，就回到本來的的位置！
-                return false;
-            }
-            ...
-            return true;
+```c++
+template <typename Rule0, typename Rule1, ...>
+struct seq {
+    template <typename Parser>
+    static bool match(Parser& p) {
+        typename Parser::iterator orig_pos = p.pos(); // 記住 iterator 本來的位置！
+        if(!Rule0::template match(p)) {
+            p.pos(orig_pos);    // 看這個！如果失敗了，就回到本來的的位置！
+            return false;
         }
-    };
+        if(!Rule1::template match(p)) {
+            p.pos(orig_pos);    // 看這個！如果失敗了，就回到本來的的位置！
+            return false;
+        }
+        ...
+        return true;
+    }
+};
+```
 
 或是更簡單的 `any_char`
 
-    struct any_char {
-        template <typename Parser>
-        static bool match(Parser &p) {
-            if(p.at_end()) return false;
-            p.next();       // 看到這邊！
-            return true;
-        }
-    } ;
+```c++
+struct any_char {
+    template <typename Parser>
+    static bool match(Parser &p) {
+        if(p.at_end()) return false;
+        p.next();       // 看到這邊！
+        return true;
+    }
+} ;
+```
 
 所以規則很簡單：
 
@@ -217,28 +235,32 @@ parsing rule 的方法，一種比較簡單，也是開發 parser 的的時候�
 比方說我們想要把 parse 到的 int 都存起來，
 那我們可以寫一個特別的 parsing rule，有點像最上面範例的 integer：
 
-    struct integer :
-        yrp::plus<
-            yrp::digit_char
-        >
-    {};
+```c++
+struct integer :
+    yrp::plus<
+        yrp::digit_char
+    >
+{};
+```
 
 現在改成
 
-    struct save_integer {
-        static bool match(Parser& p) {
-            typename Parser::iterator orig_pos = p.pos(); // 記住 iterator 本來的位置
-            if(integer::template match(p)) {
-                // 成功了，把字串轉成文字，存到 parser object 裡面
-                int result = std::stoi(orig_pos, p.pos());
-                p.my_push_back_integer(result);  // my_push_back_integer 這函數哪來的???
-                return true;
-            } else {
-                p.pos(orig_pos);
-                return false;
-            }
+```c++
+struct save_integer {
+    static bool match(Parser& p) {
+        typename Parser::iterator orig_pos = p.pos(); // 記住 iterator 本來的位置
+        if(integer::template match(p)) {
+            // 成功了，把字串轉成文字，存到 parser object 裡面
+            int result = std::stoi(orig_pos, p.pos());
+            p.my_push_back_integer(result);  // my_push_back_integer 這函數哪來的???
+            return true;
+        } else {
+            p.pos(orig_pos);
+            return false;
         }
-    };
+    }
+};
+```
 
 可以看到，非常的麻煩，所以我們不會真的這樣作。
 
@@ -251,108 +273,118 @@ parsing rule 的方法，一種比較簡單，也是開發 parser 的的時候�
 我們發現「套用 semantic action」其實也是一種 pattern，所以就可以**樣板化**。
 實際上 `yrp` 提供了兩個觸動 semantic action 的 rule，一個是直接呼叫 action 的 `just_act`
 
-    template <typename Act>
-    struct just_act
-    {
-        template <typename Parser>
-        static bool match(Parser& p) {
-            Act actor;
-            return actor(p, p.pos(), p.pos());
-        }
-    };
+```c++
+template <typename Act>
+struct just_act
+{
+    template <typename Parser>
+    static bool match(Parser& p) {
+        Act actor;
+        return actor(p, p.pos(), p.pos());
+    }
+};
+```
 
 最原始的用法是繼承一個 parser
 
-    using WsIterType = std::wstring::const_iterator;
-    struct IntParser : public yrp::parser<std::wstring::const_iterator>
+```c++
+using WsIterType = std::wstring::const_iterator;
+struct IntParser : public yrp::parser<std::wstring::const_iterator>
+{
+  public:
+
+    // constructor
+    IntParser(WsIterType b, WsIterType e)
+        : yrp::parser<WsIterType>(b, e)
     {
-      public:
+    }
 
-        // constructor
-        IntParser(WsIterType b, WsIterType e)
-            : yrp::parser<WsIterType>(b, e)
-        {
-        }
+    // using super's member，該死的 C++，不 using 看不見
+    using IterType = typename WsIterType;
+    using RangeType = std::pair<IterType, IterType>;
+    using typename yrp::parser<IterType>::iterator;
+    using typename yrp::parser<IterType>::reference;
+    using typename yrp::parser<IterType>::value_type;
+    using yrp::parser<IterType>::pos_;
+    using yrp::parser<IterType>::elem;
+    using yrp::parser<IterType>::pos;
+    using yrp::parser<IterType>::begin;
+    using yrp::parser<IterType>::end;
+    using yrp::parser<IterType>::at_begin;
+    using yrp::parser<IterType>::at_end;
+    using yrp::parser<IterType>::next;
 
-        // using super's member，該死的 C++，不 using 看不見
-        using IterType = typename WsIterType;
-        using RangeType = std::pair<IterType, IterType>;
-        using typename yrp::parser<IterType>::iterator;
-        using typename yrp::parser<IterType>::reference;
-        using typename yrp::parser<IterType>::value_type;
-        using yrp::parser<IterType>::pos_;
-        using yrp::parser<IterType>::elem;
-        using yrp::parser<IterType>::pos;
-        using yrp::parser<IterType>::begin;
-        using yrp::parser<IterType>::end;
-        using yrp::parser<IterType>::at_begin;
-        using yrp::parser<IterType>::at_end;
-        using yrp::parser<IterType>::next;
+    // parse
+    template <typename Rule>
+    bool parse() {
+        return Rule::match(*this);
+    }
 
-        // parse
-        template <typename Rule>
-        bool parse() {
-            return Rule::match(*this);
-        }
-
-        // semantic action 函數們!!!!
-        // 一概都拿一對 iterator 當作輸入，不管用的到用不到
-        // return bool
-        bool my_push_back_integer(RangeType r) {
-            int i = std::stoi(r.first, r.second);
-            _v.push_back(i);
-            return true;
-        }
-        bool my_clear_vec(RangeType) {
-            _v.clear();
-            return true;
-        }
-    };
+    // semantic action 函數們!!!!
+    // 一概都拿一對 iterator 當作輸入，不管用的到用不到
+    // return bool
+    bool my_push_back_integer(RangeType r) {
+        int i = std::stoi(r.first, r.second);
+        _v.push_back(i);
+        return true;
+    }
+    bool my_clear_vec(RangeType) {
+        _v.clear();
+        return true;
+    }
+};
+```
 
 更賭懶的來了，因為 parsing rule 只能由 class 組成，所以就沒辦法用 boost 那種 attributed grammar 的作法，
 但我也不想，因為一旦導入，就得得入跟 `boost::any`, `boost::variant` 等價的等等 class，而且還要作 `boost::fusion` 等動作，
 那就會大幅增加編譯時間。在這邊為了呼叫動作，只好乖乖多走一層，把動作包裝在 class 內部，然後轉派呼叫 parser 提供的 semantic action 函數。
 
-    namespace act {
-        struct my_push_back_integer {
-            template <typename Parser>
-            bool operator()(Parser& p, typename Parser::iterator begin, typename Parser::iterator end) {
-                return p.my_push_back_integer({begin, end});
-            }
-        } ;
-    }
+```c++
+namespace act {
+    struct my_push_back_integer {
+        template <typename Parser>
+        bool operator()(Parser& p, typename Parser::iterator begin, typename Parser::iterator end) {
+            return p.my_push_back_integer({begin, end});
+        }
+    } ;
+}
+```
 
 這時候透過 `just_act` 或 `post_act` 來觸動 semantic action。
 
-    // [3,4,5]
-    struct integer_list :
-        yrp::seq<
-            yrp::char_<L'['>,
-            yrp::just_act<act::my_clear_vec>, // 遇到 '[' 表示新的 list，你可能會想要清掉本來的
-            yrp::list<
-                yrp::post_act<integer, act::my_push_back_integer>,
-                yrp::char_<L','>
-            >,
-            yrp::char_<L']'>
-        >
-    {};
-            
+```c++
+// [3,4,5]
+struct integer_list :
+    yrp::seq<
+        yrp::char_<L'['>,
+        yrp::just_act<act::my_clear_vec>, // 遇到 '[' 表示新的 list，你可能會想要清掉本來的
+        yrp::list<
+            yrp::post_act<integer, act::my_push_back_integer>,
+            yrp::char_<L','>
+        >,
+        yrp::char_<L']'>
+    >
+{};
+```
+
 終於大功告成，謝天謝地！我都快寫不下去了！
 如果有任何人看完這段還願意使用這個 library，那我覺得你一定跟自己很想不開。
 
 因為那些轉派動作的 act class 實在太 verbose 了，所以我很難得的使用了 macro 來解決。
 
-    #define RANGE_ACT(action_name) \
-    struct action_name \
-    { \
-        template <typename Parser> \
-        bool operator()(Parser& p, typename Parser::iterator begin, typename Parser::iterator end) { \
-            return p.action_name({begin, end}); \
-        } \
-    } ;
+```c++
+#define RANGE_ACT(action_name) \
+struct action_name \
+{ \
+    template <typename Parser> \
+    bool operator()(Parser& p, typename Parser::iterator begin, typename Parser::iterator end) { \
+        return p.action_name({begin, end}); \
+    } \
+} ;
 
-    RANGE_ACT(my_push_back_integer)
-    RANGE_ACT(my_clear_vec)
-    RANGE_ACT(my_print_vec)
+RANGE_ACT(my_push_back_integer)
+RANGE_ACT(my_clear_vec)
+RANGE_ACT(my_print_vec)
+```
 
 在 `test.cc` 有一份完整會動的範例碼，不多，請參閱
