@@ -272,20 +272,9 @@ struct save_integer {
 所以 user 要自己繼承 parser class，提供 semantic action 所需要的界面。
 我們發現「套用 semantic action」其實也是一種 pattern，所以就可以**樣板化**。
 實際上 `yrp` 提供了兩個觸動 semantic action 的 rule，一個是直接呼叫 action 的 `just_act`
+另外一個是滿足條件才會觸動的 `post_act`。
 
-```c++
-template <typename Act>
-struct just_act
-{
-    template <typename Parser>
-    static bool match(Parser& p) {
-        Act actor;
-        return actor(p, p.pos(), p.pos());
-    }
-};
-```
-
-最原始的用法是繼承一個 parser
+為了要加上 semantic action 的支援，一定自己繼承一個 parser：
 
 ```c++
 using WsIterType = std::wstring::const_iterator;
@@ -319,7 +308,10 @@ struct IntParser : public yrp::parser<std::wstring::const_iterator>
     bool parse() {
         return Rule::match(*this);
     }
-
+    
+    // ↑ 通常到上面為止大多是照抄
+    // ↓ 下面開始才是為了 semantic action 寫的
+    
     // semantic action 函數們!!!!
     // 一概都拿一對 iterator 當作輸入，不管用的到用不到
     // return bool
