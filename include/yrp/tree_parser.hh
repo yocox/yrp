@@ -2,6 +2,7 @@
 #define YOCO_PARSER_TREE_PARSER_HH
 
 #include <vector>
+#include <iostream>
 #include <typeinfo>
 #include "parser.hh"
 
@@ -35,12 +36,37 @@ struct node_base {
                 func(c);
         }
     }
+
+    virtual std::wostream& dot_node(std::wostream& os) = 0;
+
+    std::wostream& dump_graphviz(std::wostream& os) {
+        os << L"digraph g {\n    rankdir=LR;\n";
+        this->dot_node(os);
+        os << L"}";
+        return os;
+    }
 } ;
 
 template <typename IterType, typename Rule>
 struct node : public node_base<IterType> {
+    using super = node_base<IterType>;
     node(IterType b, IterType e) : node_base<IterType>(b, e)
     { } ;
+    virtual std::wostream& dot_node(std::wostream& os) {
+        os << L"    \"" << this << L"\" [label=\"" << typeid(Rule).name();
+        if(super::children.empty()) {
+            os << L" : ";
+            for(auto i = super::begin; i < super::end; ++i) {
+                os << *i;
+            }
+        }
+        os << L"\"];" << std::endl;
+        for(auto child : super::children) {
+            os << L"    \"" << this << L"\" -> \"" << child << L"\";" << std::endl;
+            child->dot_node(os);
+        }
+        return os;
+    }
 } ;
 
 template <typename Rule>

@@ -55,5 +55,6 @@ int main() {
             }
             std::cout << std::endl;
         }
+        root->dump_graphviz(std::wcout);
     }
 }
