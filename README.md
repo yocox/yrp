@@ -229,10 +229,33 @@ struct any_char {
 
 形式就是照抄，基本上就像是你在寫 recursive decsent parser 一樣，你成功了，就往前走，失敗了，就回到某處。
 
+## Parse to Tree
+
+請看 [example/tree.cc](example/tree.cc) 底下有一個 60 行的小範例，讓你可以 parse
+
+    [1,3,4][23,45,2][383,34]
+    
+這樣的字串，成為一棵這樣的 tree
+
+![Tree of integer lists](http://i.imgur.com/Y9T1Pz8.png "Tree")
+
+之後你再處理 tree 就可以了。
+
+yrp 支援你使用 `dump_graphviz()` 來 dump 出上面的 graphviz，你可以輕鬆的檢視你 parse 的結果正確與否。
+
+當你寫 parsing rule 的時候，跟平常一樣，但是當你遇到想要建立 node 的 rule 時，
+就使用 `yrp::store<Rule>` 來把想要建立 node 的框起來。然後使用 `yrp::tree_parser` parse 的時候，
+`yrp::tree_parser` 遇到 `store` 的時候就會建立 node。
+
 ## Semantic action
 
+如果上面 tree 的方法不夠你使用，你想要更精細的介入 parsing 的過程，
+那你可以用更原始的方法來作 semanctic action。
+
 在 `yrp` 裡面，semactic action 也是透過 parsing rule 來達成。
-比方說我們想要把 parse 到的 int 都存起來，
+事實上上面的 tree parser 也是用一個特別的 parsing rule `store<Rule>` 來達成。
+
+以一個簡單來的例子來說，比方說我們想要把 parse 到的 int 都存起來，
 那我們可以寫一個特別的 parsing rule，有點像最上面範例的 integer：
 
 ```c++
@@ -379,4 +402,4 @@ RANGE_ACT(my_clear_vec)
 RANGE_ACT(my_print_vec)
 ```
 
-在 `test.cc` 有一份完整會動的範例碼，不多，請參閱
+在 [test.cc](test.cc) 有一份完整會動的範例碼，不多，請參閱
