@@ -91,30 +91,33 @@ namespace internal {
 template <typename Head, typename ... Tail>
 struct seq_p_impl {
     using ResultType = std::tuple<typename Head::ResultType, typename Tail::ResultType...>;
-    template <typename Parser>
-    static std::pair<bool, ResultType> match(Parser& p) {
+    template <int Index, typename Parser, typename FinalResultType>
+    static bool match(Parser& p, FinalResultType& result_value) {
         auto head_result = Head::template match(p);
         if(!head_result.first) {
-            return {false, ResultType()};
+            return false;
         }
-        auto tail_result = seq_p_impl<Tail...>::template match(p);
-        if(!tail_result.first) {
-            return {false, ResultType()};
+        std::get<Index>(result_value) = head_result.second;
+
+        bool tail_result = seq_p_impl<Tail...>::template match<Index + 1>(p, result_value);
+        if(!tail_result) {
+            return false;
         }
-        return {true, std::tuple_cat(std::make_tuple(head_result.second), std::move(tail_result.second))};
+        return true;
     }
 };
 
 template <typename Last>
 struct seq_p_impl<Last> {
     using ResultType = std::tuple<typename Last::ResultType>;
-    template <typename Parser>
-    static std::pair<bool, ResultType> match(Parser& p) {
+    template <int Index, typename Parser, typename FinalResultType>
+    static bool match(Parser& p, FinalResultType& result_value) {
         auto r = Last::template match(p);
         if(r.first) {
-            return {true, std::make_tuple(r.second)};
+            std::get<Index>(result_value) = r.second;
+            return true;
         } else {
-            return {false, ResultType()};
+            return false;
         }
     }
 };
@@ -127,12 +130,12 @@ struct seq_p {
     static std::pair<bool, ResultType> match(Parser& p) {
         typename Parser::iterator orig_pos = p.pos();
         ResultType result_value;
-        auto r = internal::seq_p_impl<Rules...>::template match(p);
-        if(r.first) {
-            return std::move(r);
+        auto r = internal::seq_p_impl<Rules...>::template match<0>(p, result_value);
+        if(r) {
+            return {true, std::move(result_value)};
         } else {
             p.pos(orig_pos);
-            return {false, ResultType()};
+            return {false, std::move(result_value)};
         }
     }
 };
