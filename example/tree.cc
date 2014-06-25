@@ -6,7 +6,7 @@
 #include <yrp/parser.hh>
 #include <yrp/act.hh>
 #include <yrp/list.hh>
-#include <yrp/tree_parser.hh>
+#include <yrp/tree_building_parser.hh>
 
 //////////////////////////////////////////////////////////////////////////////
 // Parsing Rules
@@ -41,12 +41,12 @@ struct int_lists :
 
 int main() {
     std::wstring i = L"[1,3,4][23,45,2][383,34]";
-    yrp::TreeParser<std::wstring::const_iterator> p(i.begin(), i.end());
+    yrp::TreeBuildingParser<std::wstring::const_iterator> p(i.begin(), i.end());
     bool result = p.parse<int_lists>();
     std::cout << result << std::endl;
     if(result) {
         std::cout << "test pass" << std::endl;
-        yrp::TreeParser<std::wstring::const_iterator>::NodeType* root = p.root;
+        yrp::TreeBuildingParser<std::wstring::const_iterator>::NodeType* root = p.root;
         for(const auto l : root->children) {
             for(const auto i : l->children) {
                 std::wstring s(i->begin, i->end);

@@ -1,5 +1,5 @@
-#ifndef YOCO_PARSER_TREE_PARSER_HH
-#define YOCO_PARSER_TREE_PARSER_HH
+#ifndef YOCO_PARSER_TREE_BUILDING_PARSER_HH
+#define YOCO_PARSER_TREE_BUILDING_PARSER_HH
 
 #include <vector>
 #include <iostream>
@@ -9,14 +9,14 @@
 namespace yrp {
 
 template <typename IterType>
-struct node_base {
-    node_base(IterType b, IterType e) : begin(b), end(e) {
+struct Node {
+    Node(IterType b, IterType e) : begin(b), end(e) {
     } ;
 
-    node_base<IterType>* parent;
-    std::vector<node_base<IterType>*> children;
+    Node<IterType>* parent;
+    std::vector<Node<IterType>*> children;
 
-    ~node_base() {
+    ~Node() {
         for(auto c : children) {
             delete c;
         }
@@ -25,7 +25,7 @@ struct node_base {
     IterType begin;
     IterType end;
 
-    void add_child(node_base* n) {
+    void add_child(Node* n) {
         children.push_back(n);
     }
 
@@ -48,9 +48,9 @@ struct node_base {
 } ;
 
 template <typename IterType, typename Rule>
-struct node : public node_base<IterType> {
-    using super = node_base<IterType>;
-    node(IterType b, IterType e) : node_base<IterType>(b, e)
+struct TypedNode : public Node<IterType> {
+    using super = Node<IterType>;
+    TypedNode(IterType b, IterType e) : Node<IterType>(b, e)
     { } ;
     virtual std::wostream& dot_node(std::wostream& os) {
         os << L"    \"" << this << L"\" [label=\"" << typeid(Rule).name();
@@ -74,8 +74,8 @@ struct store {
     template <typename Parser>
     static bool match(Parser &p) {
         typename Parser::iterator orig_pos = p.pos();
-        node_base<typename Parser::iterator>* c = p.current;
-        node_base<typename Parser::iterator>* n = new node<typename Parser::iterator, Rule>(orig_pos, orig_pos);
+        Node<typename Parser::iterator>* c = p.current;
+        Node<typename Parser::iterator>* n = new TypedNode<typename Parser::iterator, Rule>(orig_pos, orig_pos);
         n->parent = p.current;
         p.current = n;
         if(Rule::template match(p)) {
@@ -98,12 +98,12 @@ struct store {
 
 //using WsIterType = std::wstring::const_iterator;
 template <typename IterType>
-struct TreeParser : public yrp::parser<IterType>
+struct TreeBuildingParser : public yrp::parser<IterType>
 {
   public:
 
     // constructor
-    TreeParser(IterType b, IterType e)
+    TreeBuildingParser(IterType b, IterType e)
         : yrp::parser<IterType>(b, e)
     {
     }
@@ -121,21 +121,21 @@ struct TreeParser : public yrp::parser<IterType>
     using yrp::parser<IterType>::at_begin;
     using yrp::parser<IterType>::at_end;
     using yrp::parser<IterType>::next;
-    using NodeType = node_base<IterType>;
+    using NodeType = Node<IterType>;
 
     // parse
     template <typename Rule>
     bool parse() {
-        root = new node<IterType, Rule>(begin(), end());
+        root = new TypedNode<IterType, Rule>(begin(), end());
         current = root;
         return Rule::match(*this);
     }
 
     // data member
-    node_base<IterType>* root;
-    node_base<IterType>* current;
+    Node<IterType>* root;
+    Node<IterType>* current;
 };
 
 } // namespace yrp
 
-#endif // YOCO_PARSER_TREE_PARSER_HH
+#endif // YOCO_PARSER_TREE_BUILDING_PARSER_HH
