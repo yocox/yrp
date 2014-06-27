@@ -11,10 +11,10 @@
 struct nil {} ;
 
 template <typename IntType>
-struct int_p {
-    using ResultType = IntType;
+struct int_v {
+    using ValueType = IntType;
     template <typename Parser>
-    static std::pair<bool, ResultType> match(Parser& p) {
+    static std::pair<bool, ValueType> match(Parser& p) {
         if(p.at_end()) {
             return {false, 0};
         }
@@ -40,10 +40,10 @@ struct int_p {
 } ;
 
 template <wchar_t C>
-struct char_p {
-    using ResultType = nil;
+struct char_v {
+    using ValueType = nil;
     template <typename Parser>
-    static std::pair<bool, ResultType> match(Parser& p) {
+    static std::pair<bool, ValueType> match(Parser& p) {
         if(p.at_end()) {
             return {false, nil()};
         }
@@ -57,17 +57,17 @@ struct char_p {
 } ;
 
 template <typename Elem, typename Deli>
-struct list_p {
-    using ResultType = std::vector<typename Elem::ResultType>;
+struct list_v {
+    using ValueType = std::vector<typename Elem::ValueType>;
     template <typename Parser>
-    static std::pair<bool, ResultType> match(Parser& p) {
+    static std::pair<bool, ValueType> match(Parser& p) {
         typename Parser::iterator orig_pos = p.pos();
-        ResultType result_value;
+        ValueType result_value;
         auto e = Elem::template match(p);
 
         // parse first elem
         if(!e.first) {
-            return {false, ResultType()};
+            return {false, ValueType()};
         }
 
         // parse following "delimeter, elem" pair
@@ -79,7 +79,7 @@ struct list_p {
             auto e2 = Elem::template match(p);
             if(!e2.first) {
                 p.pos(orig_pos);
-                return {false, ResultType()};
+                return {false, ValueType()};
             } else {
                 result_value.push_back(e2.second);
             }
@@ -87,19 +87,56 @@ struct list_p {
     }
 };
 
+//////////////////////////////////////////////////////////////////////////////
+// 
+//////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+struct value {};
+
+template <typename ... Ts>
+struct ValueTypeFilter { } ;
+
+template <typename Head, typename ... Tail, typename ... Filtered>
+struct ValueTypeFilter<std::tuple<Filtered...>, Head, Tail...> {
+    using ValueType = typename ValueTypeFilter<std::tuple<Filtered...>, Tail...>::ValueType;
+} ;
+
+template <typename Head, typename ... Tail, typename ... Filtered>
+struct ValueTypeFilter<std::tuple<Filtered...>, value<Head>, Tail...> {
+    using ValueType = typename ValueTypeFilter<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::ValueType;
+} ;
+
+template <typename Tail, typename ... Filtered>
+struct ValueTypeFilter<std::tuple<Filtered...>, Tail> {
+    using ValueType = std::tuple<Filtered...>;
+} ;
+
+template <typename Tail, typename ... Filtered>
+struct ValueTypeFilter<std::tuple<Filtered...>, value<Tail>> {
+    using ValueType = std::tuple<Filtered..., typename Tail::ValueType>;
+} ;
+
+//////////////////////////////////////////////////////////////////////////////
+// 
+//////////////////////////////////////////////////////////////////////////////
+
 namespace internal {
-template <typename Head, typename ... Tail>
-struct seq_p_impl {
-    using ResultType = std::tuple<typename Head::ResultType, typename Tail::ResultType...>;
+template <typename ... Ts>
+struct seq_p_impl;
+
+template <typename Head, typename ... Tail, typename ... Filtered>
+struct seq_p_impl<std::tuple<Filtered...>, Head, Tail...> {
+    using ValueType = typename ValueTypeFilter<std::tuple<Filtered...>, Tail...>::ValueType;
     template <int Index, typename Parser, typename FinalResultType>
     static bool match(Parser& p, FinalResultType& result_value) {
         auto head_result = Head::template match(p);
         if(!head_result.first) {
             return false;
         }
-        std::get<Index>(result_value) = head_result.second;
+        //std::get<Index>(result_value) = head_result.second;
 
-        bool tail_result = seq_p_impl<Tail...>::template match<Index + 1>(p, result_value);
+        bool tail_result = seq_p_impl<std::tuple<Filtered...>, Tail...>::template match<Index>(p, result_value);
         if(!tail_result) {
             return false;
         }
@@ -107,9 +144,44 @@ struct seq_p_impl {
     }
 };
 
-template <typename Last>
-struct seq_p_impl<Last> {
-    using ResultType = std::tuple<typename Last::ResultType>;
+template <typename Head, typename ... Tail, typename ... Filtered>
+struct seq_p_impl<std::tuple<Filtered...>, value<Head>, Tail...> {
+    using ValueType = typename ValueTypeFilter<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::ValueType;
+    template <int Index, typename Parser, typename FinalResultType>
+    static bool match(Parser& p, FinalResultType& result_value) {
+        auto head_result = Head::template match(p);
+        if(!head_result.first) {
+            return false;
+        }
+        //static_assert(std::is_same<decltype(std::get<Index>(result_value)), decltype(head_result.second)>::value, "rdenwdor");
+        std::get<Index>(result_value) = head_result.second;
+        //std::get<Index>(result_value) = 1;
+
+        bool tail_result = seq_p_impl<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::template match<Index + 1>(p, result_value);
+        if(!tail_result) {
+            return false;
+        }
+        return true;
+    }
+};
+
+template <typename Last, typename ... Filtered>
+struct seq_p_impl<std::tuple<Filtered...>, Last> {
+    using ValueType = std::tuple<Filtered...>;
+    template <int Index, typename Parser, typename FinalResultType>
+    static bool match(Parser& p, FinalResultType&) {
+        auto r = Last::template match(p);
+        if(r.first) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+};
+
+template <typename Last, typename ... Filtered>
+struct seq_p_impl<std::tuple<Filtered...>, value<Last>> {
+    using ValueType = std::tuple<Filtered..., typename Last::ValueType>;
     template <int Index, typename Parser, typename FinalResultType>
     static bool match(Parser& p, FinalResultType& result_value) {
         auto r = Last::template match(p);
@@ -121,22 +193,24 @@ struct seq_p_impl<Last> {
         }
     }
 };
-}
+
+} // namespace internal
 
 template <typename ... Rules>
-struct seq_p {
-    using ResultType = std::tuple<typename Rules::ResultType...>;
+struct seq_v {
+    using ValueType = typename ValueTypeFilter<std::tuple<>, Rules...>::ValueType;
     template <typename Parser>
-    static std::pair<bool, ResultType> match(Parser& p) {
+    static std::pair<bool, ValueType> match(Parser& p) {
         typename Parser::iterator orig_pos = p.pos();
-        ResultType result_value;
-        auto r = internal::seq_p_impl<Rules...>::template match<0>(p, result_value);
+        ValueType result_value;
+        auto r = internal::seq_p_impl<std::tuple<>, Rules...>::template match<0>(p, result_value);
         if(r) {
             return {true, std::move(result_value)};
         } else {
             p.pos(orig_pos);
             return {false, std::move(result_value)};
         }
+        return {true, ValueType()};
     }
 };
 
@@ -171,7 +245,7 @@ struct ValueBuildingParser : public yrp::parser<IterType>
 
     // parse
     template <typename Rule>
-    std::pair<bool, typename Rule::ResultType> parse() {
+    std::pair<bool, typename Rule::ValueType> parse() {
         return Rule::match(*this);
     }
 
@@ -182,30 +256,31 @@ struct ValueBuildingParser : public yrp::parser<IterType>
 // main
 //////////////////////////////////////////////////////////////////////////////
 
-struct ints :
-    list_p<
-        int_p<int>,
-        char_p<L' '>
+struct int_pair :
+    seq_v<
+        value<int_v<int>>,
+        char_v<L','>,
+        value<int_v<int>>
     >
 {} ;
 
-struct int_pair :
-    seq_p<
-        int_p<int>,
-        char_p<L','>,
-        int_p<int>
+struct int_pairs :
+    list_v<
+        int_pair,
+        char_v<L' '>
     >
 {} ;
 
 int main() {
-    std::wstring i = L"123,456";
+    std::wstring i = L"123,456 34,33 324,11 234,3";
     ValueBuildingParser<std::wstring::const_iterator> p(i.begin(), i.end());
-    auto result = p.parse<int_pair>();
+    auto result = p.parse<int_pairs>();
     if(result.first) {
         std::cout << "parse success" << std::endl;
         std::cout << "result value is " << std::endl;
-        std::cout << "    " << std::get<0>(result.second) << std::endl;
-        std::cout << "    " << std::get<2>(result.second) << std::endl;
+        for(const auto& ip : result.second) {
+            std::cout << "    " << std::get<0>(ip) << ", " << std::get<1>(ip) << std::endl;
+        }
     } else {
         std::cout << "parse fail" << std::endl;
     }
