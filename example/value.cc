@@ -1,6 +1,8 @@
 #include <vector>
 #include <iostream>
 #include <tuple>
+#include <boost/optional.hpp>
+#include <boost/variant.hpp>
 #include <yrp/star.hh>
 #include <yrp/text.hh>
 #include <yrp/opt.hh>
@@ -10,49 +12,76 @@
 
 struct nil {} ;
 
-template <typename IntType>
+template <typename IntType = int>
 struct int_v {
     using ValueType = IntType;
     template <typename Parser>
-    static std::pair<bool, ValueType> match(Parser& p) {
+    static bool match(Parser& p, ValueType& v) {
         if(p.at_end()) {
-            return {false, 0};
+            return false;
         }
 
         // parse first digit, false if not digit
-        IntType result = IntType(0);
+        v = ValueType(0);
         if(p.elem() < L'0' || p.elem() > L'9') {
-            return {false, 0};
+            return false;
         } else {
-            result = p.elem() - L'0';
+            v = p.elem() - L'0';
         }
         p.next();
 
         // parse following digit
         while(!p.at_end() && p.elem() >= L'0' && p.elem() <= L'9') {
-            result *= 10;
-            result += p.elem() - L'0';
+            v *= 10;
+            v += p.elem() - L'0';
             p.next();
         }
 
-        return {true, result};
+        return true;
     }
 } ;
 
 template <wchar_t C>
 struct char_v {
-    using ValueType = nil;
+    using ValueType = wchar_t;
     template <typename Parser>
-    static std::pair<bool, ValueType> match(Parser& p) {
+    static bool match(Parser& p, ValueType& v) {
         if(p.at_end()) {
-            return {false, nil()};
+            return false;
+        }
+        if(p.elem() == C) {
+            v = p.elem();
+            p.next();
+            return true;
+        } else {
+            return false;
+        }
+    }
+    template <typename Parser>
+    static bool match(Parser& p) {
+        if(p.at_end()) {
+            return false;
         }
         if(p.elem() == C) {
             p.next();
-            return {true, nil()};
+            return true;
         } else {
-            return {false, nil()};
+            return false;
         }
+    }
+} ;
+
+template <typename Rule>
+struct str_v {
+    using ValueType = std::wstring;
+    template <typename Parser>
+    static bool match(Parser& p, ValueType& v) {
+        typename Parser::iterator orig_pos = p.pos();
+        if(!Rule::template match(p)) {
+            return false;
+        }
+        v = std::wstring(orig_pos, p.pos());
+        return true;
     }
 } ;
 
@@ -60,66 +89,92 @@ template <typename Elem, typename Deli>
 struct list_v {
     using ValueType = std::vector<typename Elem::ValueType>;
     template <typename Parser>
-    static std::pair<bool, ValueType> match(Parser& p) {
+    static bool match(Parser& p, ValueType& v) {
         typename Parser::iterator orig_pos = p.pos();
-        ValueType result_value;
-        auto e = Elem::template match(p);
+        typename Elem::ValueType elem_value;
+        bool success = Elem::template match(p, elem_value);
 
         // parse first elem
-        if(!e.first) {
-            return {false, ValueType()};
+        if(!success) {
+            return false;
         }
 
         // parse following "delimeter, elem" pair
-        result_value.push_back(e.second);
+        v.clear();
+        v.push_back(elem_value);
         while(true) {
-            if (!Deli::template match(p).first) {
-                return {true, std::move(result_value)};
+            if (!Deli::template match(p)) {
+                return true;
             }
-            auto e2 = Elem::template match(p);
-            if(!e2.first) {
+            bool success = Elem::template match(p, elem_value);
+            if(!success) {
                 p.pos(orig_pos);
-                return {false, ValueType()};
+                return false;
             } else {
-                result_value.push_back(e2.second);
+                v.push_back(elem_value);
             }
         }
     }
 };
+
+template <typename Rule>
+struct opt_v {
+    using ValueType = boost::optional<typename Rule::ValueType>;
+    template <typename Parser>
+    static bool match(Parser& p, ValueType& v) {
+        v = typename Rule::ValueType();
+        bool success = Rule::template match(p, v.get());
+        if(!success) {
+            v = boost::none;
+        }
+        return true;
+    }
+} ;
+
+template <typename ... Rule>
+struct or_v_impl { } ;
+
+template <typename Head, typename ... Tail>
+struct or_v_impl<Head, Tail...> {
+    template <typename Parser, typename VariantType>
+    static bool match(Parser& p, VariantType& v) {
+        typename Head::ValueType hv;
+        if(Head::template match(p, hv)) {
+            v = hv;
+            return true;
+        }
+        return or_v_impl<Tail...>::template match(p, v);
+    }
+} ;
+
+template <typename Last>
+struct or_v_impl<Last> {
+    template <typename Parser, typename VariantType>
+    static bool match(Parser& p, VariantType& v) {
+        typename Last::ValueType hv;
+        if(Last::template match(p, hv)) {
+            v = hv;
+            return true;
+        }
+        return false;
+    }
+} ;
+
+template <typename ... Rule>
+struct or_v {
+    using ValueType = boost::variant<typename Rule::ValueType...>;
+    template <typename Parser>
+    static bool match(Parser& p, ValueType& v) {
+        return or_v_impl<Rule...>::template match(p, v);
+    }
+} ;
 
 //////////////////////////////////////////////////////////////////////////////
 // 
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-struct value {};
-
-template <typename ... Ts>
-struct ValueTypeFilter { } ;
-
-template <typename Head, typename ... Tail, typename ... Filtered>
-struct ValueTypeFilter<std::tuple<Filtered...>, Head, Tail...> {
-    using ValueType = typename ValueTypeFilter<std::tuple<Filtered...>, Tail...>::ValueType;
-} ;
-
-template <typename Head, typename ... Tail, typename ... Filtered>
-struct ValueTypeFilter<std::tuple<Filtered...>, value<Head>, Tail...> {
-    using ValueType = typename ValueTypeFilter<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::ValueType;
-} ;
-
-template <typename Tail, typename ... Filtered>
-struct ValueTypeFilter<std::tuple<Filtered...>, Tail> {
-    using ValueType = std::tuple<Filtered...>;
-} ;
-
-template <typename Tail, typename ... Filtered>
-struct ValueTypeFilter<std::tuple<Filtered...>, value<Tail>> {
-    using ValueType = std::tuple<Filtered..., typename Tail::ValueType>;
-} ;
-
-//////////////////////////////////////////////////////////////////////////////
-// 
-//////////////////////////////////////////////////////////////////////////////
+struct ignore {};
 
 namespace internal {
 template <typename ... Ts>
@@ -127,35 +182,13 @@ struct seq_p_impl;
 
 template <typename Head, typename ... Tail, typename ... Filtered>
 struct seq_p_impl<std::tuple<Filtered...>, Head, Tail...> {
-    using ValueType = typename ValueTypeFilter<std::tuple<Filtered...>, Tail...>::ValueType;
+    using ValueType = typename seq_p_impl<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::ValueType;
     template <int Index, typename Parser, typename FinalResultType>
     static bool match(Parser& p, FinalResultType& result_value) {
-        auto head_result = Head::template match(p);
-        if(!head_result.first) {
+        bool head_result = Head::template match(p, std::get<Index>(result_value));
+        if(!head_result) {
             return false;
         }
-        //std::get<Index>(result_value) = head_result.second;
-
-        bool tail_result = seq_p_impl<std::tuple<Filtered...>, Tail...>::template match<Index>(p, result_value);
-        if(!tail_result) {
-            return false;
-        }
-        return true;
-    }
-};
-
-template <typename Head, typename ... Tail, typename ... Filtered>
-struct seq_p_impl<std::tuple<Filtered...>, value<Head>, Tail...> {
-    using ValueType = typename ValueTypeFilter<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::ValueType;
-    template <int Index, typename Parser, typename FinalResultType>
-    static bool match(Parser& p, FinalResultType& result_value) {
-        auto head_result = Head::template match(p);
-        if(!head_result.first) {
-            return false;
-        }
-        //static_assert(std::is_same<decltype(std::get<Index>(result_value)), decltype(head_result.second)>::value, "rdenwdor");
-        std::get<Index>(result_value) = head_result.second;
-        //std::get<Index>(result_value) = 1;
 
         bool tail_result = seq_p_impl<std::tuple<Filtered..., typename Head::ValueType>, Tail...>::template match<Index + 1>(p, result_value);
         if(!tail_result) {
@@ -165,13 +198,31 @@ struct seq_p_impl<std::tuple<Filtered...>, value<Head>, Tail...> {
     }
 };
 
+template <typename Head, typename ... Tail, typename ... Filtered>
+struct seq_p_impl<std::tuple<Filtered...>, ignore<Head>, Tail...> {
+    using ValueType = typename seq_p_impl<std::tuple<Filtered...>, Tail...>::ValueType;
+    template <int Index, typename Parser, typename FinalResultType>
+    static bool match(Parser& p, FinalResultType& result_value) {
+        auto head_result = Head::template match(p);
+        if(!head_result) {
+            return false;
+        }
+
+        bool tail_result = seq_p_impl<std::tuple<Filtered...>, Tail...>::template match<Index>(p, result_value);
+        if(!tail_result) {
+            return false;
+        }
+        return true;
+    }
+};
+
 template <typename Last, typename ... Filtered>
 struct seq_p_impl<std::tuple<Filtered...>, Last> {
-    using ValueType = std::tuple<Filtered...>;
+    using ValueType = std::tuple<Filtered..., typename Last::ValueType>;
     template <int Index, typename Parser, typename FinalResultType>
-    static bool match(Parser& p, FinalResultType&) {
-        auto r = Last::template match(p);
-        if(r.first) {
+    static bool match(Parser& p, FinalResultType& result_value) {
+        auto r = Last::template match(p, std::get<Index>(result_value));
+        if(r) {
             return true;
         } else {
             return false;
@@ -180,13 +231,12 @@ struct seq_p_impl<std::tuple<Filtered...>, Last> {
 };
 
 template <typename Last, typename ... Filtered>
-struct seq_p_impl<std::tuple<Filtered...>, value<Last>> {
-    using ValueType = std::tuple<Filtered..., typename Last::ValueType>;
+struct seq_p_impl<std::tuple<Filtered...>, ignore<Last>> {
+    using ValueType = std::tuple<Filtered...>;
     template <int Index, typename Parser, typename FinalResultType>
-    static bool match(Parser& p, FinalResultType& result_value) {
+    static bool match(Parser& p, FinalResultType&) {
         auto r = Last::template match(p);
-        if(r.first) {
-            std::get<Index>(result_value) = r.second;
+        if(r) {
             return true;
         } else {
             return false;
@@ -198,19 +248,18 @@ struct seq_p_impl<std::tuple<Filtered...>, value<Last>> {
 
 template <typename ... Rules>
 struct seq_v {
-    using ValueType = typename ValueTypeFilter<std::tuple<>, Rules...>::ValueType;
+    using ValueType = typename internal::seq_p_impl<std::tuple<>, Rules...>::ValueType;
     template <typename Parser>
-    static std::pair<bool, ValueType> match(Parser& p) {
+    static bool match(Parser& p, ValueType& v) {
         typename Parser::iterator orig_pos = p.pos();
-        ValueType result_value;
-        auto r = internal::seq_p_impl<std::tuple<>, Rules...>::template match<0>(p, result_value);
+        auto r = internal::seq_p_impl<std::tuple<>, Rules...>::template match<0>(p, v);
         if(r) {
-            return {true, std::move(result_value)};
+            return true;
         } else {
             p.pos(orig_pos);
-            return {false, std::move(result_value)};
+            return false;
         }
-        return {true, ValueType()};
+        return true;
     }
 };
 
@@ -246,40 +295,64 @@ struct ValueBuildingParser : public yrp::parser<IterType>
     // parse
     template <typename Rule>
     std::pair<bool, typename Rule::ValueType> parse() {
-        return Rule::match(*this);
+        typename Rule::ValueType result_value;
+        bool success = Rule::match(*this, result_value);
+        return {success, result_value};
     }
 
     // data member
 };
 
 //////////////////////////////////////////////////////////////////////////////
+// grammar
+//////////////////////////////////////////////////////////////////////////////
+
+struct int_list :
+    seq_v<
+        ignore<yrp::char_<L'['>>,
+        list_v<
+            int_v<>,
+            yrp::char_<L','>
+        >,
+        ignore<yrp::char_<L']'>>
+    >
+{};
+
+struct int_lists :
+    seq_v<
+        opt_v<or_v<char_v<L'!'>, int_v<int>>>,
+        list_v<
+            int_list,
+            yrp::char_<L' '>
+        >
+    >
+{};
+
+//////////////////////////////////////////////////////////////////////////////
 // main
 //////////////////////////////////////////////////////////////////////////////
 
-struct int_pair :
-    seq_v<
-        value<int_v<int>>,
-        char_v<L','>,
-        value<int_v<int>>
-    >
-{} ;
-
-struct int_pairs :
-    list_v<
-        int_pair,
-        char_v<L' '>
-    >
-{} ;
-
 int main() {
-    std::wstring i = L"123,456 34,33 324,11 234,3";
+    std::wstring i = L"777[124,33334,993] [123,45634,33324,11234,3]";
     ValueBuildingParser<std::wstring::const_iterator> p(i.begin(), i.end());
-    auto result = p.parse<int_pairs>();
+    auto result = p.parse<int_lists>();
     if(result.first) {
         std::cout << "parse success" << std::endl;
         std::cout << "result value is " << std::endl;
-        for(const auto& ip : result.second) {
-            std::cout << "    " << std::get<0>(ip) << ", " << std::get<1>(ip) << std::endl;
+        auto& init_token = std::get<0>(result.second);
+        if(init_token) {
+            auto& vari = init_token.get();
+            if(vari.type() == typeid(wchar_t)) {
+                std::wcout << L"wchar_w " << init_token.get() << std::endl;
+            } else {
+                std::wcout << L"int " << init_token.get() << std::endl;
+            }
+        }
+        for(const auto& il : std::get<1>(result.second)) {
+            for(const auto& i : std::get<0>(il)) {
+                std::cout << i << " ";
+            }
+            std::cout << std::endl;
         }
     } else {
         std::cout << "parse fail" << std::endl;
