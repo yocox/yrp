@@ -71,6 +71,10 @@ struct char_v {
     }
 } ;
 
+//////////////////////////////////////////////////////////////////////////////
+// str_v
+//////////////////////////////////////////////////////////////////////////////
+
 template <typename Rule>
 struct str_v {
     using ValueType = std::wstring;
@@ -84,6 +88,10 @@ struct str_v {
         return true;
     }
 } ;
+
+//////////////////////////////////////////////////////////////////////////////
+// list_v
+//////////////////////////////////////////////////////////////////////////////
 
 template <typename Elem, typename Deli>
 struct list_v {
@@ -117,6 +125,10 @@ struct list_v {
     }
 };
 
+//////////////////////////////////////////////////////////////////////////////
+// opt_v
+//////////////////////////////////////////////////////////////////////////////
+
 template <typename Rule>
 struct opt_v {
     using ValueType = boost::optional<typename Rule::ValueType>;
@@ -130,6 +142,10 @@ struct opt_v {
         return true;
     }
 } ;
+
+//////////////////////////////////////////////////////////////////////////////
+// or_v
+//////////////////////////////////////////////////////////////////////////////
 
 template <typename ... Rule>
 struct or_v_impl { } ;
@@ -170,11 +186,46 @@ struct or_v {
 } ;
 
 //////////////////////////////////////////////////////////////////////////////
-// 
+// star_v, plus_v
+//////////////////////////////////////////////////////////////////////////////
+
+template <typename Rule>
+struct star_v {
+    using ValueType = std::vector<typename Rule::ValueType>;
+    template <typename Parser>
+    static bool match(Parser& p, ValueType& v) {
+        typename Rule::ValueType e;
+        while(Rule::template match(p, e)) {
+            v.push_back(e);
+        }
+        return true;
+    }
+} ;
+
+template <typename Rule>
+struct plus_v {
+    using ValueType = std::vector<typename Rule::ValueType>;
+    template <typename Parser>
+    static bool match(Parser& p, ValueType& v) {
+        typename Rule::ValueType e;
+        if(Rule::template match(p, e)) {
+            v.push_back(e);
+        } else {
+            return false;
+        }
+        while(Rule::template match(p, e)) {
+            v.push_back(e);
+        }
+        return true;
+    }
+} ;
+
+//////////////////////////////////////////////////////////////////////////////
+// seq_v
 //////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-struct ignore {};
+struct novalue {};
 
 namespace internal {
 template <typename ... Ts>
@@ -199,7 +250,7 @@ struct seq_p_impl<std::tuple<Filtered...>, Head, Tail...> {
 };
 
 template <typename Head, typename ... Tail, typename ... Filtered>
-struct seq_p_impl<std::tuple<Filtered...>, ignore<Head>, Tail...> {
+struct seq_p_impl<std::tuple<Filtered...>, novalue<Head>, Tail...> {
     using ValueType = typename seq_p_impl<std::tuple<Filtered...>, Tail...>::ValueType;
     template <int Index, typename Parser, typename FinalResultType>
     static bool match(Parser& p, FinalResultType& result_value) {
@@ -231,7 +282,7 @@ struct seq_p_impl<std::tuple<Filtered...>, Last> {
 };
 
 template <typename Last, typename ... Filtered>
-struct seq_p_impl<std::tuple<Filtered...>, ignore<Last>> {
+struct seq_p_impl<std::tuple<Filtered...>, novalue<Last>> {
     using ValueType = std::tuple<Filtered...>;
     template <int Index, typename Parser, typename FinalResultType>
     static bool match(Parser& p, FinalResultType&) {
@@ -299,28 +350,64 @@ struct ValueBuildingParser : public yrp::parser<IterType>
         bool success = Rule::match(*this, result_value);
         return {success, result_value};
     }
-
-    // data member
 };
 
 //////////////////////////////////////////////////////////////////////////////
 // grammar
 //////////////////////////////////////////////////////////////////////////////
 
+struct Point {
+    int x;
+    int y;
+} ;
+
+struct coor_v {
+    using ValueType = Point;
+    template <typename Parser>
+    static bool match(Parser& p, Point& v) {
+        typename Parser::iterator orig_pos = p.pos();
+        int x, y;
+        if(yrp::char_<L'('>::template match(p) &&
+           int_v<>::template match(p, x) &&
+           yrp::char_<L','>::template match(p) &&
+           int_v<>::template match(p, y) &&
+           yrp::char_<L')'>::template match(p))
+        {
+            v.x = x;
+            v.y = y;
+            return true;
+        } else {
+            p.pos(orig_pos);
+            return false;
+        }
+    }
+} ;
+
+struct Points :
+    plus_v<
+        coor_v
+    >
+{};
+
 struct int_list :
     seq_v<
-        ignore<yrp::char_<L'['>>,
+        novalue<yrp::char_<L'['>>,
         list_v<
             int_v<>,
             yrp::char_<L','>
         >,
-        ignore<yrp::char_<L']'>>
+        novalue<yrp::char_<L']'>>
     >
 {};
 
 struct int_lists :
     seq_v<
-        opt_v<or_v<char_v<L'!'>, int_v<int>>>,
+        opt_v<or_v<
+            char_v<L'!'>,
+            int_v<int>,
+            str_v<yrp::id_word>,
+            plus_v<char_v<L'#'>>
+        >>,
         list_v<
             int_list,
             yrp::char_<L' '>
@@ -333,28 +420,42 @@ struct int_lists :
 //////////////////////////////////////////////////////////////////////////////
 
 int main() {
-    std::wstring i = L"777[124,33334,993] [123,45634,33324,11234,3]";
+    std::wstring i = L"(3,5)(4,7)(5,9)";
     ValueBuildingParser<std::wstring::const_iterator> p(i.begin(), i.end());
-    auto result = p.parse<int_lists>();
-    if(result.first) {
-        std::cout << "parse success" << std::endl;
-        std::cout << "result value is " << std::endl;
-        auto& init_token = std::get<0>(result.second);
-        if(init_token) {
-            auto& vari = init_token.get();
-            if(vari.type() == typeid(wchar_t)) {
-                std::wcout << L"wchar_w " << init_token.get() << std::endl;
-            } else {
-                std::wcout << L"int " << init_token.get() << std::endl;
-            }
-        }
-        for(const auto& il : std::get<1>(result.second)) {
-            for(const auto& i : std::get<0>(il)) {
-                std::cout << i << " ";
-            }
-            std::cout << std::endl;
-        }
-    } else {
-        std::cout << "parse fail" << std::endl;
+    auto result = p.parse<Points>();
+    for(const auto& p : result.second) {
+        std::cout << p.x << ", " << p.y << std::endl;
     }
+
+    //std::wstring i = L"yoco[124,33334,993] [123,45634,33324,11234,3]";
+    //ValueBuildingParser<std::wstring::const_iterator> p(i.begin(), i.end());
+    //auto result = p.parse<int_lists>();
+    //if(result.first) {
+    //    std::cout << "parse success" << std::endl;
+    //    auto& init_token = std::get<0>(result.second);
+    //    if(init_token) {
+    //        auto& vari = init_token.get();
+    //        std::cout << vari.which() << std::endl;
+    //        if(vari.type() == typeid(wchar_t)) {
+    //            std::wcout << L"wchar_t " << boost::get<wchar_t>(init_token.get()) << std::endl;
+    //        } else if(vari.type() == typeid(int)) {
+    //            std::wcout << L"int " << boost::get<int>(init_token.get()) << std::endl;
+    //        } else if(vari.type() == typeid(std::wstring)) {
+    //            std::wcout << L"str " << boost::get<std::wstring>(init_token.get()) << std::endl;
+    //        } else {
+    //            std::wcout << boost::get<std::vector<wchar_t>>(init_token.get()).size() << std::endl;
+    //            for(auto c : boost::get<std::vector<wchar_t>>(init_token.get())) {
+    //                std::wcout << L"char vector " << c << std::endl;
+    //            }
+    //        }
+    //    }
+    //    for(const auto& il : std::get<1>(result.second)) {
+    //        for(const auto& i : std::get<0>(il)) {
+    //            std::cout << i << " ";
+    //        }
+    //        std::cout << std::endl;
+    //    }
+    //} else {
+    //    std::cout << "parse fail" << std::endl;
+    //}
 }
